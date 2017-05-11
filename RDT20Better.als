@@ -1,38 +1,109 @@
 module RDT10 
 open util/ordering[State] 
 
-sig Data{}
+sig Payload {}
 
 // A ACK packet is always followed by sending new data
-sig ACK extends Data {}
+sig ACK extends Payload{}
 
 // A NAK packet is always followed by re-transferring the last data
-sig NAK extends Data {
-	appliesTo: one Data
+sig NAK extends Payload {
 }
 
-sig File extends Data {}
+sig Data extends Payload {}
 
-abstract sig Checksum {}
-lone sig GoodChecksum extends Checksum {}
-lone sig BadChecksum extends Checksum {}
+sig Checksum {}
+
+one sig ChecksumAlgorithm {
+	checksums: Payload -> one Checksum
+}
+
+fun Payload.checksum {
+	ChecksumAlgorithm.checksums[this]
+}
+
+pred isCorrupt[p: Packet] {
+	p.checksum != p.payload.checksum
+}
+
+pred makePacket[packet: Packet, payload: Payload] {
+	one checksum: Checksum |
+			packet.payload = payload and
+			packet.checksum = checksum
+}
+
+pred Transition[s, s': State] {
+	no s.channel => (
+		no s.senderBuffer => 
+			Skip[s, s']
+		else
+			SendNewData[s,s']
+	)
+	else (
+		isData[s.channel] => (
+			isCorrupt[s.channel] =>
+				// Todo
+			else
+				// Todod
+		)
+		else isAck[s.channel] => (
+			// TODO
+		)
+		else (
+			// Todo
+		)
+	)
+}
+
+pred isData[p: Packet] {
+	p.payload in Data
+}
+
+pred isAck[p: Packet] {
+	p.payload in Ack
+}
+
+pred isNak[p: Packet] {
+	p.payload in Nak
+}
+
+pred SendNewData[s, s'] {
+	one d: s.senderBuffer, p: Packet | 
+		makePacket[p, d] and
+		s'.channel = p and
+		s'.lastSent = d and
+		s'.senderBuffer = s.senderBuffer - d
+}
+
+
+pred Test {
+	first.Init
+	SendNewData[first, first.next]
+	
+}
+
+
+
+
 
 // A packet is what is sent over the wire
 // The checksum can be either good, or bad
 sig Packet {
 	checksum: one Checksum,
-	data: one Data
+	data: one Payload
 }
 
 sig State {
 	// The sender's buffer
-	senderBuffer: set File,
+	senderBuffer: set Data,
 
 	// The receiver's buffer
-	receiverBuffer: set File,
+	receiverBuffer: set Data,
 
 	// The packet currently being transmitted
-	packet: lone Packet
+	channel: lone Packet
+
+	lastSent: lone Data
 }
 
 // There is no data that exists outside of the sender's buffer + receiver's buffer
