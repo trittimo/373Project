@@ -1,5 +1,6 @@
 module RDT10 
-open util/ordering[State] 
+open util/ordering[State]
+open util/boolean
 
 // The thing to be sent
 abstract sig Payload {}
@@ -20,7 +21,8 @@ lone sig BadChecksum extends Checksum {}
 // A packet is what is sent over the wire
 sig Packet {
 	checksum: one Checksum,
-	payload: one Payload
+	payload: one Payload,
+	sequence: Bool
 }
 
 sig State {
@@ -41,9 +43,10 @@ pred isCorrupt[p: Packet] {
 	p.checksum = BadChecksum
 }
 
-pred makePacket[p: Packet, pa: Payload] {
+pred makePacket[p: Packet, pa: Payload, s: Bool] {
 	p.payload = pa and
-	p.checksum in Checksum
+	p.checksum in Checksum and
+	p.sequence = s
 }
 
 pred Skip[s, s': State] {
@@ -67,7 +70,7 @@ pred isNak[p: Packet] {
 
 pred SendNewData[s, s': State] {
 	one p: Packet, d: s.senderBuffer | 
-		makePacket[p, d] and
+		makePacket[p, d, False] and
 		s'.packet = p and
 		s'.lastSent = d and
 		s'.senderBuffer = s.senderBuffer - d and
@@ -76,7 +79,8 @@ pred SendNewData[s, s': State] {
 
 pred ResendData[s, s': State] {
 	one p: Packet |
-		makePacket[p, s.lastSent] and
+		makePacket[p, s.lastSent, True] and
+		p.checksum = GoodChecksum and
 		s'.packet = p and
 		s'.lastSent = s.lastSent and
 		s.senderBuffer = s'.senderBuffer and
@@ -85,16 +89,22 @@ pred ResendData[s, s': State] {
 
 pred SendNak[s, s' : State] {
 	one p: Packet|
-		makePacket[p, NAK] and
+		makePacket[p, NAK, False] and
 		s'.packet = p and
 		s'.lastSent = s.lastSent
 }
 
 pred SendAck[s, s' : State] {
 	one p: Packet |
-		makePacket[p, ACK] and
+		makePacket[p, ACK, False] and
 		s'.packet = p and
-		s'.receiverBuffer = s.receiverBuffer + s.lastSent
+		p.checksum = GoodChecksum => (
+			s'.receiverBuffer = s.receiverBuffer + s.lastSent
+		)
+		else (
+			s'.receiverBuffer = s.receiverBuffer// and
+			//s'.lastSent = s.lastSent
+		)
 }
 
 pred NoDataLoss[s, s': State] {
@@ -122,11 +132,10 @@ pred Transition[s, s': State] {
 					SendNak[s, s'] and
 					NoBufferChange[s, s'])
 				else
-					(SendAck[s, s'])
+					SendAck[s, s']
 			)
 			else isCorrupt[s.packet] => (
-				// Enter a state of deadlock if the Nak packet is corrupt
-				Skip[s, s']
+				ResendData[s, s']
 			)
 			else isAck[s.packet] => (
 				// Send the next data
@@ -173,6 +182,6 @@ pred TraceNotWorking {
 	not last.end[]
 }
 
-// run Test for exactly 3 State, exactly 1 Data, exactly 2 Checksum, exactly 2 Packet, exactly 3 Payload
-// run TraceWorking for 10 State, exactly 5 Payload, exactly 8 Packet
+//run Test for exactly 3 State, exactly 1 Data, exactly 2 Checksum, exactly 2 Packet, exactly 3 Payload
+run TraceWorking for 9 State, exactly 3 Data, 6 Packet, exactly 2 Checksum
 //run TraceNotWorking for 16 State, exactly 6 Data, 12 Packet
